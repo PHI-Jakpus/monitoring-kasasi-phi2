@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Monitoring Kasasi PHI — PN Jakarta Pusat</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #f5f4f0; --surface: #ffffff; --surface2: #f0efe9;
+    --border: #e0ddd4; --text: #1a1916; --text-muted: #6b6860; --text-faint: #9e9b93;
+    --green: #2d6a2f; --green-bg: #e8f5e9;
+    --red: #b71c1c; --red-bg: #fdecea;
+    --blue: #0d47a1; --blue-bg: #e3f2fd;
+    --amber: #e65100; --amber-bg: #fff3e0;
+    --purple: #4527a0; --purple-bg: #ede7f6;
+    --radius: 8px; --radius-lg: 12px;
+  }
+  body { font-family: 'IBM Plex Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; line-height: 1.5; }
+
+  .topbar { background: var(--text); color: #f5f4f0; padding: 0 2rem; height: 52px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+  .topbar-brand { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 500; }
+  .logo { width: 28px; height: 28px; background: #f5f4f0; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: var(--text); font-size: 14px; }
+  .topbar-right { display: flex; align-items: center; gap: 16px; font-size: 12px; color: rgba(255,255,255,.55); }
+  .live-dot { display: inline-flex; align-items: center; gap: 5px; color: #81c784; font-weight: 500; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #81c784; animation: blink 1.4s ease-in-out infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
+
+  .page { max-width: 1320px; margin: 0 auto; padding: 1.5rem 2rem 3rem; }
+  .page-header { margin-bottom: 1.5rem; }
+  .page-header h1 { font-size: 20px; font-weight: 600; }
+  .page-header p { font-size: 13px; color: var(--text-muted); margin-top: 3px; }
+
+  .loading-overlay { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 5rem 0; color: var(--text-muted); font-size: 14px; }
+  .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--text); border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .error-box { background: var(--red-bg); border: 1px solid #f5c6c6; border-radius: var(--radius-lg); padding: 1.5rem 2rem; color: var(--red); font-size: 13px; line-height: 1.8; }
+  .error-box strong { display: block; font-size: 15px; margin-bottom: 8px; }
+
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 1.5rem; }
+  .metric { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+  .metric-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+  .metric-value { font-size: 28px; font-weight: 600; line-height: 1; }
+  .metric-sub { font-size: 11px; color: var(--text-faint); margin-top: 5px; }
+  .metric.green .metric-value { color: var(--green); }
+  .metric.red .metric-value { color: var(--red); }
+  .metric.blue .metric-value { color: var(--blue); }
+  .metric.amber .metric-value { color: var(--amber); }
+
+  .charts-row { display: grid; grid-template-columns: 300px 1fr; gap: 12px; margin-bottom: 1.5rem; }
+  @media (max-width: 800px) { .charts-row { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1.1rem 1.25rem; }
+  .card-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); margin-bottom: 14px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+  .pie-wrap { display: flex; flex-direction: column; gap: 14px; }
+  .pie-canvas-wrap { position: relative; width: 100%; height: 170px; }
+  .legend { display: flex; flex-direction: column; gap: 7px; }
+  .leg-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); }
+  .leg-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+  .leg-count { margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--text); font-weight: 500; }
+  .prog-list { display: flex; flex-direction: column; gap: 11px; }
+  .prog-row { display: flex; align-items: center; gap: 10px; }
+  .prog-label { width: 175px; font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+  .prog-track { flex: 1; height: 7px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
+  .prog-fill { height: 100%; border-radius: 4px; }
+  .prog-num { width: 40px; text-align: right; font-size: 11px; font-family: 'IBM Plex Mono', monospace; color: var(--text-muted); }
+
+  .filter-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .search-wrap { position: relative; flex: 1; min-width: 220px; max-width: 360px; }
+  .search-wrap svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-faint); width: 14px; height: 14px; }
+  .filter-bar input[type="text"] { width: 100%; height: 34px; padding: 0 10px 0 32px; border: 1px solid var(--border); border-radius: var(--radius); font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; background: var(--surface); color: var(--text); outline: none; }
+  .filter-bar input[type="text"]:focus { border-color: var(--text); }
+  .filter-bar select { height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius); font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; background: var(--surface); color: var(--text); cursor: pointer; outline: none; }
+  .count-label { font-size: 12px; color: var(--text-faint); margin-left: auto; }
+  .refresh-btn { height: 34px; padding: 0 14px; background: var(--text); color: #f5f4f0; border: none; border-radius: var(--radius); font-size: 13px; font-family: 'IBM Plex Sans', sans-serif; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+  .refresh-btn:hover { opacity: .8; }
+  .refresh-btn svg { width: 13px; height: 13px; }
+
+  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+  .table-scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 1100px; }
+  thead th { padding: 10px 12px; text-align: left; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); background: var(--surface2); border-bottom: 1px solid var(--border); white-space: nowrap; }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background .12s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--surface2); }
+  tbody td { padding: 9px 12px; font-size: 12px; color: var(--text); vertical-align: middle; }
+  .no-cell { font-size: 11px; color: var(--text-faint); }
+  .perkara-cell { font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 500; white-space: nowrap; }
+  .pihak-cell { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .date-cell { font-size: 11px; color: var(--text-muted); white-space: nowrap; font-family: 'IBM Plex Mono', monospace; }
+  .days-cell { display: flex; align-items: center; gap: 6px; }
+  .days-bar { height: 5px; border-radius: 3px; background: #1565c0; min-width: 2px; }
+  .days-num { font-size: 11px; font-family: 'IBM Plex Mono', monospace; }
+  .badge { display: inline-block; font-size: 10.5px; font-weight: 600; padding: 3px 8px; border-radius: 4px; white-space: nowrap; }
+  .b-green  { background: var(--green-bg);  color: var(--green); }
+  .b-red    { background: var(--red-bg);    color: var(--red); }
+  .b-blue   { background: var(--blue-bg);   color: var(--blue); }
+  .b-amber  { background: var(--amber-bg);  color: var(--amber); }
+  .b-purple { background: var(--purple-bg); color: var(--purple); }
+  .empty-row td { text-align: center; color: var(--text-faint); font-size: 13px; padding: 2rem; }
+  .footer { text-align: center; font-size: 11px; color: var(--text-faint); margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-brand">
+    <div class="logo">⚖</div>
+    Kepaniteraan PHI — PN Jakarta Pusat Kelas I A Khusus
+  </div>
+  <div class="topbar-right">
+    <span class="live-dot"><span class="dot"></span>Live dari Google Sheets</span>
+    <span id="clock"></span>
+  </div>
+</div>
+
+<div class="page">
+  <div class="page-header">
+    <h1>Monitoring Kasasi PHI</h1>
+    <p>Pemantauan tahapan proses pengiriman berkas kasasi — data diambil langsung dari Google Sheets secara otomatis</p>
+  </div>
+  <div id="main-content">
+    <div class="loading-overlay"><div class="spinner"></div><span>Mengambil data dari Google Sheets...</span></div>
+  </div>
+</div>
+
+<!-- Google Visualization API — solusi resmi tanpa CORS -->
+<script src="https://www.gstatic.com/charts/loader.js"></script>
+<script>
+const SHEET_ID  = '2PACX-1vSSOnHwmli50pOLJANJ6NKcaga1AN5c1RicSfHRytzT2uu-tQZME3NA4LOBlfZxIw8cvVYqbmFVl1aj';
+const GID       = '901071239';
+
+let DATA = [];
+let pieChart = null;
+
+google.charts.load('current', { packages: ['corechart'] });
+google.charts.setOnLoadCallback(loadData);
+
+function loadData() {
+  document.getElementById('main-content').innerHTML = `
+    <div class="loading-overlay"><div class="spinner"></div><span>Mengambil data terbaru dari Google Sheets...</span></div>`;
+
+  const query = new google.visualization.Query(
+    `https://docs.google.com/spreadsheets/d/e/${SHEET_ID}/pub?gid=${GID}&output=csv`
+  );
+
+  // Gunakan query language untuk ambil semua kolom
+  const queryUrl = `https://docs.google.com/spreadsheets/d/e/${SHEET_ID}/gviz/tq?gid=${GID}&tq=select%20*&headers=1`;
+
+  fetch(queryUrl)
+    .then(r => r.text())
+    .then(raw => {
+      // Parse Google Visualization JSON response
+      const json = JSON.parse(raw.replace(/^[^(]+\(/, '').replace(/\);?\s*$/, ''));
+      const cols = json.table.cols.map(c => c.label);
+      const rows = json.table.rows || [];
+
+      DATA = rows.map((row, idx) => {
+        const c = row.c || [];
+        const val = i => (c[i] && c[i].v !== null && c[i].v !== undefined)
+          ? (c[i].f || String(c[i].v)).trim()
+          : '—';
+        return {
+          no:               val(0),
+          perkara:          val(1),
+          pemohon:          val(2) || '—',
+          termohon:         val(3) || '—',
+          putus:            val(4),
+          kasasi:           val(5),
+          pmbrtKasasi:      val(6),
+          memori:           val(7),
+          verifMemori:      val(8),
+          pmbrtMemori:      val(9),
+          kontra:           val(10),
+          verifKontra:      val(11),
+          pmbrtKontra:      val(12),
+          inzaghePenggugat: val(13),
+          inzagheTergugat:  val(14),
+          lama:             parseInt(val(15)) || null,
+          keterangan:       val(16) || '—',
+        };
+      }).filter(r => r.perkara && r.perkara !== '—');
+
+      buildUI();
+    })
+    .catch(err => {
+      // Fallback: coba via CSV langsung
+      loadViaCSV();
+    });
+}
+
+function loadViaCSV() {
+  const csvUrl = `https://docs.google.com/spreadsheets/d/e/${SHEET_ID}/pub?gid=${GID}&single=true&output=csv`;
+  fetch(csvUrl)
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    })
+    .then(text => {
+      DATA = parseCSV(text);
+      buildUI();
+    })
+    .catch(err => {
+      document.getElementById('main-content').innerHTML = `
+        <div style="padding:2rem;">
+          <div class="error-box">
+            <strong>⚠ Gagal mengambil data dari Google Sheets</strong>
+            Kemungkinan penyebab:<br>
+            • Koneksi internet tidak aktif<br>
+            • Google Sheets belum dipublikasikan (File → Share → Publish to web)<br>
+            • Browser memblokir akses (coba buka via GitHub Pages, bukan file lokal)<br><br>
+            <button class="refresh-btn" onclick="loadData()" style="margin-top:8px;">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              Coba Lagi
+            </button>
+          </div>
+        </div>`;
+    });
+}
+
+function parseCSV(text) {
+  const rows = [];
+  let cur = '', inQ = false, row = [];
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i], n = text[i+1];
+    if (c === '"') { inQ = !inQ; }
+    else if (c === ',' && !inQ) { row.push(cur.trim()); cur = ''; }
+    else if ((c === '\n' || c === '\r') && !inQ) {
+      if (c === '\r' && n === '\n') i++;
+      row.push(cur.trim()); rows.push(row); row = []; cur = '';
+    } else { cur += c; }
+  }
+  if (cur || row.length) { row.push(cur.trim()); rows.push(row); }
+
+  const clean = v => (v||'').replace(/^"|"$/g,'').trim() || '—';
+  return rows.slice(1).filter(r => r.length >= 2 && clean(r[1]) !== '—').map(r => ({
+    no: clean(r[0]), perkara: clean(r[1]), pemohon: clean(r[2]), termohon: clean(r[3]),
+    putus: clean(r[4]), kasasi: clean(r[5]), pmbrtKasasi: clean(r[6]),
+    memori: clean(r[7]), verifMemori: clean(r[8]), pmbrtMemori: clean(r[9]),
+    kontra: clean(r[10]), verifKontra: clean(r[11]), pmbrtKontra: clean(r[12]),
+    inzaghePenggugat: clean(r[13]), inzagheTergugat: clean(r[14]),
+    lama: parseInt(clean(r[15]))||null, keterangan: clean(r[16]),
+  }));
+}
+
+function statusInfo(ket) {
+  const k = (ket||'').toLowerCase();
+  if (k.includes('siap kirim'))                   return { label:'Siap Kirim',           cls:'b-green' };
+  if (k.includes('belum mengajukan kontra'))       return { label:'Belum Kontra Memori',  cls:'b-amber' };
+  if (k.includes('pemberitahuan pernyataan kasasi belum') || k.includes('kasasi belum')) return { label:'Pmbrt. Kasasi Belum', cls:'b-red' };
+  if (k.includes('belum mengajukan memori'))       return { label:'Belum Memori',         cls:'b-red' };
+  if (k.includes('pemberitahuan memori belum'))    return { label:'Pmbrt. Memori Belum',  cls:'b-amber' };
+  if (k.includes('pemberitahuan kontra belum'))    return { label:'Pmbrt. Kontra Belum',  cls:'b-amber' };
+  if (k.includes('inzaghe'))                       return { label:'Pmbrt. Inzaghe Belum', cls:'b-purple' };
+  if (k === '—' || k === '')                       return { label:'Belum Data',            cls:'b-red' };
+  return { label: ket.length > 30 ? ket.slice(0,28)+'…' : ket, cls:'b-blue' };
+}
+
+function hasVal(v) { return v && v !== '—' && v !== '_' && v !== ''; }
+
+function buildUI() {
+  const total   = DATA.length;
+  const siap    = DATA.filter(r => r.keterangan.toLowerCase().includes('siap kirim')).length;
+  const belum   = DATA.filter(r => r.keterangan.toLowerCase().includes('belum')).length;
+  const proses  = total - siap - belum;
+  const lamaArr = DATA.filter(r => r.lama !== null).map(r => r.lama);
+  const rataLama = lamaArr.length ? Math.round(lamaArr.reduce((a,b)=>a+b,0)/lamaArr.length) : 0;
+
+  document.getElementById('main-content').innerHTML = `
+    <div class="metrics">
+      <div class="metric"><div class="metric-label">Total Perkara</div><div class="metric-value">${total}</div><div class="metric-sub">Kasasi PHI 2025</div></div>
+      <div class="metric green"><div class="metric-label">Siap Kirim</div><div class="metric-value">${siap}</div><div class="metric-sub">${Math.round(siap/total*100)}% dari total</div></div>
+      <div class="metric amber"><div class="metric-label">Sedang Proses</div><div class="metric-value">${proses}</div><div class="metric-sub">${Math.round(proses/total*100)}% dari total</div></div>
+      <div class="metric red"><div class="metric-label">Belum Lengkap</div><div class="metric-value">${belum}</div><div class="metric-sub">${Math.round(belum/total*100)}% dari total</div></div>
+      <div class="metric blue"><div class="metric-label">Rata-rata Proses</div><div class="metric-value">${rataLama}</div><div class="metric-sub">hari (siap kirim)</div></div>
+    </div>
+
+    <div class="charts-row">
+      <div class="card">
+        <div class="card-title">Distribusi Status</div>
+        <div class="pie-wrap">
+          <div class="pie-canvas-wrap"><canvas id="pieChart"></canvas></div>
+          <div class="legend" id="pie-legend"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Progres Tahapan Perkara</div>
+        <div class="prog-list" id="prog-bars"></div>
+      </div>
+    </div>
+
+    <div class="filter-bar">
+      <div class="search-wrap">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="text" id="searchBox" placeholder="Cari no. perkara, pemohon, termohon..." oninput="renderTable()">
+      </div>
+      <select id="statusFilter" onchange="renderTable()">
+        <option value="">Semua status</option>
+        <option value="siap kirim">Siap Kirim</option>
+        <option value="belum">Belum Lengkap</option>
+        <option value="kontra">Belum Kontra</option>
+      </select>
+      <button class="refresh-btn" onclick="loadData()">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        Refresh
+      </button>
+      <span class="count-label" id="count-label"></span>
+    </div>
+
+    <div class="table-wrap">
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>No.</th><th>No. Perkara</th><th>Pemohon</th><th>Termohon</th>
+              <th>Tgl. Putus</th><th>Tgl. Pernyataan Kasasi</th><th>Tgl. Pmbrt. Kasasi</th>
+              <th>Tgl. Memori</th><th>Tgl. Verif. Memori</th><th>Tgl. Pmbrt. Memori</th>
+              <th>Tgl. Kontra</th><th>Tgl. Verif. Kontra</th><th>Tgl. Pmbrt. Kontra</th>
+              <th>Pmbrt. Inzaghe (P)</th><th>Pmbrt. Inzaghe (T)</th>
+              <th>Lama (hari)</th><th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="footer">
+      Kepaniteraan Pengadilan Hubungan Industrial — Pengadilan Negeri Jakarta Pusat Kelas I A Khusus
+      &nbsp;|&nbsp; <span id="ts"></span>
+    </div>`;
+
+  // PIE CHART
+  const statusMap = {};
+  DATA.forEach(r => { const s = statusInfo(r.keterangan); statusMap[s.label] = (statusMap[s.label]||0)+1; });
+  const clrMap = { 'Siap Kirim':'#2d6a2f','Belum Kontra Memori':'#e65100','Pmbrt. Kasasi Belum':'#b71c1c','Belum Data':'#c62828','Belum Memori':'#c62828','Pmbrt. Memori Belum':'#f57f17','Pmbrt. Kontra Belum':'#e65100','Pmbrt. Inzaghe Belum':'#4527a0' };
+  const defClr = ['#1565c0','#4527a0','#00695c','#558b2f','#6a1b9a','#c62828'];
+  const labels = Object.keys(statusMap);
+  const counts = labels.map(l=>statusMap[l]);
+  const colors = labels.map((l,i)=>clrMap[l]||defClr[i%defClr.length]);
+
+  document.getElementById('pie-legend').innerHTML = labels.map((l,i)=>
+    `<div class="leg-item"><span class="leg-dot" style="background:${colors[i]}"></span>${l}<span class="leg-count">${counts[i]}</span></div>`
+  ).join('');
+
+  if (pieChart) pieChart.destroy();
+  pieChart = new Chart(document.getElementById('pieChart'), {
+    type:'doughnut',
+    data:{ labels, datasets:[{ data:counts, backgroundColor:colors, borderWidth:0, hoverOffset:4 }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} }, cutout:'62%' }
+  });
+
+  // PROGRESS BARS
+  const steps = [
+    { label:'Pernyataan Kasasi',    key:'kasasi',           color:'#0d47a1' },
+    { label:'Pmbrt. Kasasi',        key:'pmbrtKasasi',      color:'#1565c0' },
+    { label:'Pengajuan Memori',     key:'memori',           color:'#4527a0' },
+    { label:'Verifikasi Memori',    key:'verifMemori',      color:'#6a1b9a' },
+    { label:'Pmbrt. Memori',        key:'pmbrtMemori',      color:'#880e4f' },
+    { label:'Pengajuan Kontra',     key:'kontra',           color:'#bf360c' },
+    { label:'Verifikasi Kontra',    key:'verifKontra',      color:'#e65100' },
+    { label:'Pmbrt. Kontra',        key:'pmbrtKontra',      color:'#f57f17' },
+    { label:'Pmbrt. Inzaghe (P)',   key:'inzaghePenggugat', color:'#2d6a2f' },
+    { label:'Pmbrt. Inzaghe (T)',   key:'inzagheTergugat',  color:'#1b5e20' },
+  ];
+  document.getElementById('prog-bars').innerHTML = steps.map(s => {
+    const n = DATA.filter(r=>hasVal(r[s.key])).length;
+    const pct = Math.round(n/total*100);
+    return `<div class="prog-row">
+      <span class="prog-label">${s.label}</span>
+      <div class="prog-track"><div class="prog-fill" style="width:${pct}%; background:${s.color};"></div></div>
+      <span class="prog-num">${n}/${total}</span>
+    </div>`;
+  }).join('');
+
+  renderTable();
+  updateClock();
+}
+
+function renderTable() {
+  const q  = (document.getElementById('searchBox')?.value||'').toLowerCase();
+  const sf = (document.getElementById('statusFilter')?.value||'').toLowerCase();
+  const maxDays = Math.max(...DATA.filter(r=>r.lama!==null).map(r=>r.lama), 1);
+
+  const filtered = DATA.filter(r => {
+    const mQ = !q || r.perkara.toLowerCase().includes(q) || r.pemohon.toLowerCase().includes(q) || r.termohon.toLowerCase().includes(q);
+    const mS = !sf || r.keterangan.toLowerCase().includes(sf);
+    return mQ && mS;
+  });
+
+  document.getElementById('count-label').textContent = `Menampilkan ${filtered.length} dari ${DATA.length} perkara`;
+
+  const tbody = document.getElementById('tableBody');
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="17">Tidak ada data yang sesuai filter</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filtered.map(r => {
+    const st = statusInfo(r.keterangan);
+    const dBar = r.lama !== null
+      ? `<div class="days-cell"><div class="days-bar" style="width:${Math.round(r.lama/maxDays*50)}px;"></div><span class="days-num">${r.lama}</span></div>`
+      : '<span style="color:#9e9b93;font-size:11px;">—</span>';
+    return `<tr>
+      <td class="no-cell">${r.no}</td>
+      <td class="perkara-cell">${r.perkara}</td>
+      <td><div class="pihak-cell" title="${r.pemohon}">${r.pemohon}</div></td>
+      <td><div class="pihak-cell" title="${r.termohon}">${r.termohon}</div></td>
+      <td class="date-cell">${r.putus}</td>
+      <td class="date-cell">${r.kasasi}</td>
+      <td class="date-cell">${r.pmbrtKasasi}</td>
+      <td class="date-cell">${r.memori}</td>
+      <td class="date-cell">${r.verifMemori}</td>
+      <td class="date-cell">${r.pmbrtMemori}</td>
+      <td class="date-cell">${r.kontra}</td>
+      <td class="date-cell">${r.verifKontra}</td>
+      <td class="date-cell">${r.pmbrtKontra}</td>
+      <td class="date-cell">${r.inzaghePenggugat}</td>
+      <td class="date-cell">${r.inzagheTergugat}</td>
+      <td>${dBar}</td>
+      <td><span class="badge ${st.cls}">${st.label}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+function updateClock() {
+  const now = new Date();
+  const opts = { weekday:'long', year:'numeric', month:'long', day:'numeric' };
+  const str  = now.toLocaleDateString('id-ID', opts) + ', ' + now.toLocaleTimeString('id-ID');
+  const el = document.getElementById('clock'); if(el) el.textContent = str;
+  const ts = document.getElementById('ts');    if(ts) ts.textContent = 'Diperbarui: ' + str;
+}
+
+setInterval(updateClock, 1000);
+setInterval(loadData, 5 * 60 * 1000);
+</script>
+</body>
+</html>
